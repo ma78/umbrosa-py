@@ -1,0 +1,253 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Umbrosa Python Backend - Lambda functions and Step Functions for scheduled Vapi calls
+
+Parameters:
+  SupabaseUrl:
+    Type: String
+    Description: Supabase project URL
+  SupabaseServiceKey:
+    Type: String
+    Description: Supabase service role key
+    NoEcho: true
+  VapiKey:
+    Type: String
+    Description: Vapi API key
+    NoEcho: true
+  VapiPhoneNumberId:
+    Type: String
+    Description: Vapi phone number ID
+  MariaAssistantId:
+    Type: String
+    Default: f024a1ed-343e-4363-8b2d-9daf6af31110
+    Description: Maria assistant ID
+  ViAssistantId:
+    Type: String
+    Default: 43950926-3935-4853-8475-14da102748b5
+    Description: Vi assistant ID
+  InterviewSeriesMarcus:
+    Type: String
+    Default: a6462580-007c-4e31-805a-acd5de1dfee3
+    Description: Marcus interview series ID
+  InterviewSeriesSue:
+    Type: String
+    Default: 70b87980-eae2-49b0-98cc-036867a6a1fd
+    Description: Sue interview series ID
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 60
+    MemorySize: 256
+    Environment:
+      Variables:
+        SUPABASE_URL: !Ref SupabaseUrl
+        SUPABASE_SERVICE_KEY: !Ref SupabaseServiceKey
+        VAPI_API_KEY: !Ref VapiKey
+        VAPI_PHONE_NUMBER_ID: !Ref VapiPhoneNumberId
+        MARIA_ASSISTANT_ID: !Ref MariaAssistantId
+        VI_ASSISTANT_ID: !Ref ViAssistantId
+        INTERVIEW_SERIES_MARCUS: !Ref InterviewSeriesMarcus
+        INTERVIEW_SERIES_SUE: !Ref InterviewSeriesSue
+
+Resources:
+
+  # ============================================
+  # Lambda Functions
+  # ============================================
+
+  GetScheduledCallsFunction:
+    Type: AWS::ServerlessFunction
+    Properties:
+      CodeUri: lambdas/scheduled-calls/
+      Handler: handler.lambda_handler
+      Description: Get list of scheduled calls for a batch
+
+  GetContextFunction:
+    Type: AWS::ServerlessFunction
+    Properties:
+      CodeUri: lambdas/get-context/
+      Handler: handler.lambda_handler
+      Description: Fetch conversation context from Supabase
+
+  CreateVapiCallFunction:
+    Type: AWS::ServerlessFunction
+    Properties:
+      CodeUri: lambdas/create-vapi-call/
+      Handler: handler.lambda_handler
+      Description: Create outbound Vapi call
+      Timeout: 30
+
+  WebhookFunction:
+    Type: AWS::ServerlessFunction
+    Properties:
+      CodeUri: lambdas/webhook/
+      Handler: handler.lambda_handler
+      Description: Process Vapi webhook and store transcripts
+      Timeout: 30
+      Events:
+        VapiWebhook:
+          Type: Api
+          Properties:
+            Path: /webhook
+            Method: post
+
+  # ============================================
+  # Step Functions
+  # ============================================
+
+  ScheduledCallsWorkflow:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Definition:
+        Comment: "Execute scheduled Vapi calls with context injection"
+        StartAt: GetScheduledCalls
+        States:
+          GetScheduledCalls:
+            Type: Task
+            Resource: !GetAtt GetScheduledCallsFunction.Arn
+            Next: MapCalls
+            Catch:
+              - ErrorEquals: ["States.ALL"]
+                ResultPath: "$.error"
+                Next: SendFailureNotification
+
+          MapCalls:
+            Type: Map
+            ItemsPath: "$.calls"
+            MaxConcurrency: 5
+            Iterator:
+              StartAt: GetConversationContext
+              States:
+                GetConversationContext:
+                  Type: Task
+                  Resource: !GetAtt GetContextFunction.Arn
+                  Next: CreateVapiCall
+                  Retry:
+                    - ErrorEquals: ["States.TaskFailed"]
+                      IntervalSeconds: 2
+                      MaxAttempts: 3
+                      BackoffRate: 2.0
+                  Catch:
+                    - ErrorEquals: ["States.ALL"]
+                      ResultPath: "$.contextError"
+                      Next: CreateVapiCall
+
+                CreateVapiCall:
+                  Type: Task
+                  Resource: !GetAtt CreateVapiCallFunction.Arn
+                  Next: LogSuccess
+                  Retry:
+                    - ErrorEquals: ["States.TaskFailed"]
+                      IntervalSeconds: 1
+                      MaxAttempts: 2
+                      BackoffRate: 2.0
+                  Catch:
+                    - ErrorEquals: ["States.ALL"]
+                      ResultPath: "$.callError"
+                      Next: LogError
+
+                LogSuccess:
+                  Type: Pass
+                  Result:
+                    status: "success"
+                  End: true
+
+                LogError:
+                  Type: Pass
+                  Result:
+                    status: "error"
+                  End: true
+
+            Next: SendSummary
+
+          SendSummary:
+            Type: Pass
+            Result:
+              message: "Scheduled calls execution complete"
+            End: true
+
+          SendFailureNotification:
+            Type: Pass
+            Result:
+              message: "Workflow failed"
+            End: true
+
+      Role: !Ref StepFunctionsRole
+      Events:
+        MorningSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: "cron(30 0 * * ? *)"
+            Enabled: true
+            Input: '{"batch": "morning"}'
+        AfternoonSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: "cron(20 5 * * ? *)"
+            Enabled: true
+            Input: '{"batch": "afternoon"}'
+
+  # ============================================
+  # IAM Roles
+  # ============================================
+
+  StepFunctionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaRole
+      Policies:
+        - PolicyName: InvokeLambdas
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt GetScheduledCallsFunction.Arn
+                  - !GetAtt GetContextFunction.Arn
+                  - !GetAtt CreateVapiCallFunction.Arn
+
+  # ============================================
+  # API Gateway (for webhook)
+  # ============================================
+
+  WebhookApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      DefinitionBody:
+        paths:
+          /webhook:
+            post:
+              x-amazon-apigateway-integration:
+                httpMethod: POST
+                type: aws_proxy
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebhookFunction.Arn}/invocations
+              responses: {}
+
+# ============================================
+  # Outputs
+# ============================================
+
+Outputs:
+  WebhookApiUrl:
+    Description: Webhook API endpoint URL
+    Value: !Sub "https://${WebhookApi}.execute-api.${AWS::Region}.amazonaws.com/prod/webhook"
+
+  ScheduledCallsWorkflowArn:
+    Description: Step Functions workflow ARN
+    Value: !Ref ScheduledCallsWorkflow
+
+  WebhookFunctionArn:
+    Description: Webhook Lambda function ARN
+    Value: !GetAtt WebhookFunction.Arn

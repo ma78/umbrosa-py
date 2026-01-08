@@ -1,0 +1,54 @@
+name: Deploy to AWS Lambda
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-southeast-2
+
+      - name: Install SAM CLI
+        run: |
+          pip install aws-sam-cli
+          sam --version
+
+      - name: Build SAM application
+        run: sam build
+
+      - name: Deploy to AWS
+        run: |
+          sam deploy \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              SupabaseUrl=${{ secrets.SUPABASE_URL }} \
+              SupabaseServiceKey=${{ secrets.SUPABASE_SERVICE_KEY }} \
+              VapiKey=${{ secrets.VAPI_API_KEY }} \
+              VapiPhoneNumberId=${{ secrets.VAPI_PHONE_NUMBER_ID }} \
+              MariaAssistantId=${{ secrets.MARIA_ASSISTANT_ID }} \
+              ViAssistantId=${{ secrets.VI_ASSISTANT_ID }} \
+              InterviewSeriesMarcus=${{ secrets.INTERVIEW_SERIES_MARCUS }} \
+              InterviewSeriesSue=${{ secrets.INTERVIEW_SERIES_SUE }}
+
+      - name: Output deployment results
+        run: |
+          echo "Webhook API URL: ${{ steps.deploy.outputs.WebhookApiUrl }}"
+          echo "Step Functions ARN: ${{ steps.deploy.outputs.ScheduledCallsWorkflowArn }}"

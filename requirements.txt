@@ -1,0 +1,4 @@
+# Lambda dependencies
+supabase==2.11.3
+vapi==0.1.4
+requests==2.32.3
