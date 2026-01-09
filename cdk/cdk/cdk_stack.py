@@ -43,6 +43,17 @@ class UmbrosaBackendStack(Stack):
         )
 
         # ============================================
+        # Shared Lambda Layer
+        # ============================================
+
+        shared_layer = _lambda.LayerVersion(
+            self, "SharedLayer",
+            code=_lambda.Code.from_asset("../src"),
+            description="Shared utilities for Lambda functions",
+            compatible_runtimes=[_lambda.Runtime.PYTHON_3_12],
+        )
+
+        # ============================================
         # Lambda Functions
         # ============================================
 
@@ -51,11 +62,11 @@ class UmbrosaBackendStack(Stack):
             "runtime": _lambda.Runtime.PYTHON_3_12,
             "timeout": Duration.seconds(60),
             "memory_size": 256,
+            "layers": [shared_layer],
             "environment": {
-                "SUPABASE_URL": config_secret.secret_value_from_json("supabase_url").to_string(),
-                "SUPABASE_SERVICE_KEY": supabase_secret.secret_value_to_string(),
-                "VAPI_API_KEY": vapi_secret.secret_value_to_string(),
-                "VAPI_PHONE_NUMBER_ID": config_secret.secret_value_from_json("vapi_phone_number_id").to_string(),
+                "VAPI_SECRET_ARN": vapi_secret.secret_arn,
+                "SUPABASE_SECRET_ARN": supabase_secret.secret_arn,
+                "CONFIG_SECRET_ARN": config_secret.secret_arn,
                 "MARIA_ASSISTANT_ID": self.node.try_get_context("maria_assistant_id") or "f024a1ed-343e-4363-8b2d-9daf6af31110",
                 "VI_ASSISTANT_ID": self.node.try_get_context("vi_assistant_id") or "43950926-3935-4853-8475-14da102748b5",
                 "INTERVIEW_SERIES_MARCUS": self.node.try_get_context("interview_series_marcus") or "a6462580-007c-4e31-805a-acd5de1dfee3",

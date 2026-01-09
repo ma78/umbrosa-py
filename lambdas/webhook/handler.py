@@ -8,11 +8,7 @@ import json
 from datetime import datetime
 from typing import Dict, Any
 from supabase import create_client
-
-supabase = create_client(
-    os.getenv("SUPABASE_URL"),
-    os.getenv("SUPABASE_SERVICE_KEY")
-)
+from src.secrets import get_credentials, get_config
 
 def lambda_handler(event, context):
     """
@@ -31,6 +27,15 @@ def lambda_handler(event, context):
     }
     """
     print(f"📥 Webhook received at {datetime.utcnow().isoformat()}")
+
+    # Get credentials from Secrets Manager
+    creds = get_credentials()
+    config = get_config()
+
+    supabase = create_client(
+        config.get("supabase_url"),
+        creds["SUPABASE_SERVICE_KEY"]
+    )
 
     try:
         # Parse webhook body

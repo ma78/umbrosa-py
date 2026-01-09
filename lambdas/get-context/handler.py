@@ -4,13 +4,8 @@ Step Function Task: Fetch previous conversation context from Supabase
 """
 
 import os
-from typing import Optional
+from src.secrets import get_credentials
 from supabase import create_client
-
-supabase = create_client(
-    os.getenv("SUPABASE_URL"),
-    os.getenv("SUPABASE_SERVICE_KEY")
-)
 
 def lambda_handler(event, context):
     """
@@ -27,6 +22,14 @@ def lambda_handler(event, context):
     }
     """
     interview_series_id = event.get('interviewSeriesId')
+
+    # Get credentials from Secrets Manager
+    creds = get_credentials()
+
+    supabase = create_client(
+        os.getenv("SUPABASE_URL", "https://your-project.supabase.co"),
+        creds["SUPABASE_SERVICE_KEY"]
+    )
 
     try:
         result = supabase.table('call_transcripts').select(

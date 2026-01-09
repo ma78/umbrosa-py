@@ -4,9 +4,8 @@ Step Function Task: Create outbound call using Vapi SDK
 """
 
 import os
+from src.secrets import get_credentials
 from vapi import Vapi
-
-vapi = Vapi(api_key=os.getenv("VAPI_API_KEY"))
 
 def lambda_handler(event, context):
     """
@@ -32,6 +31,11 @@ def lambda_handler(event, context):
     phone_number_id = event.get('phoneNumberId')
     customer_number = event.get('customerNumber')
     previous_context = event.get('context')
+
+    # Get credentials from Secrets Manager
+    creds = get_credentials()
+
+    vapi = Vapi(api_key=creds["VAPI_API_KEY"])
 
     print(f"📞 Creating call to {customer_number}")
     print(f"   → Assistant: {assistant_id}")
