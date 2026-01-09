@@ -93,103 +93,7 @@ Resources:
             Method: post
 
   # ============================================
-  # Step Functions
-  # ============================================
-
-  ScheduledCallsWorkflow:
-    Type: AWS::Serverless::StateMachine
-    Properties:
-      Definition:
-        Comment: "Execute scheduled Vapi calls with context injection"
-        StartAt: GetScheduledCalls
-        States:
-          GetScheduledCalls:
-            Type: Task
-            Resource: !GetAtt GetScheduledCallsFunction.Arn
-            Next: MapCalls
-            Catch:
-              - ErrorEquals: ["States.ALL"]
-                ResultPath: "$.error"
-                Next: SendFailureNotification
-
-          MapCalls:
-            Type: Map
-            ItemsPath: "$.calls"
-            MaxConcurrency: 5
-            Iterator:
-              StartAt: GetConversationContext
-              States:
-                GetConversationContext:
-                  Type: Task
-                  Resource: !GetAtt GetContextFunction.Arn
-                  Next: CreateVapiCall
-                  Retry:
-                    - ErrorEquals: ["States.TaskFailed"]
-                      IntervalSeconds: 2
-                      MaxAttempts: 3
-                      BackoffRate: 2.0
-                  Catch:
-                    - ErrorEquals: ["States.ALL"]
-                      ResultPath: "$.contextError"
-                      Next: CreateVapiCall
-
-                CreateVapiCall:
-                  Type: Task
-                  Resource: !GetAtt CreateVapiCallFunction.Arn
-                  Next: LogSuccess
-                  Retry:
-                    - ErrorEquals: ["States.TaskFailed"]
-                      IntervalSeconds: 1
-                      MaxAttempts: 2
-                      BackoffRate: 2.0
-                  Catch:
-                    - ErrorEquals: ["States.ALL"]
-                      ResultPath: "$.callError"
-                      Next: LogError
-
-                LogSuccess:
-                  Type: Pass
-                  Result:
-                    status: "success"
-                  End: true
-
-                LogError:
-                  Type: Pass
-                  Result:
-                    status: "error"
-                  End: true
-
-            Next: SendSummary
-
-          SendSummary:
-            Type: Pass
-            Result:
-              message: "Scheduled calls execution complete"
-            End: true
-
-          SendFailureNotification:
-            Type: Pass
-            Result:
-              message: "Workflow failed"
-            End: true
-
-      Role: !Ref StepFunctionsRole
-      Events:
-        MorningSchedule:
-          Type: Schedule
-          Properties:
-            Schedule: "cron(30 0 * * ? *)"
-            Enabled: true
-            Input: '{"batch": "morning"}'
-        AfternoonSchedule:
-          Type: Schedule
-          Properties:
-            Schedule: "cron(20 5 * * ? *)"
-            Enabled: true
-            Input: '{"batch": "afternoon"}'
-
-  # ============================================
-  # IAM Roles
+  # IAM Role for Step Functions
   # ============================================
 
   StepFunctionsRole:
@@ -218,22 +122,99 @@ Resources:
                   - !GetAtt CreateVapiCallFunction.Arn
 
   # ============================================
-  # API Gateway (for webhook)
+  # Step Functions State Machine
   # ============================================
 
-  WebhookApi:
-    Type: AWS::Serverless::Api
+  ScheduledCallsWorkflow:
+    Type: AWS::StepFunctions::StateMachine
     Properties:
-      StageName: prod
-      DefinitionBody:
-        paths:
-          /webhook:
-            post:
-              x-amazon-apigateway-integration:
-                httpMethod: POST
-                type: aws_proxy
-                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebhookFunction.Arn}/invocations
-              responses: {}
+      StateMachineName: UmbrosaScheduledCalls
+      RoleArn: !GetAtt StepFunctionsRole.Arn
+      DefinitionString:
+        !Sub
+        - |
+          {
+            "Comment": "Execute scheduled Vapi calls with context injection",
+            "StartAt": "GetScheduledCalls",
+            "States": {
+              "GetScheduledCalls": {
+                "Type": "Task",
+                "Resource": "${GetScheduledCallsArn}",
+                "Next": "MapCalls",
+                "Catch": [{
+                  "ErrorEquals": ["States.ALL"],
+                  "ResultPath": "$.error",
+                  "Next": "SendFailureNotification"
+                }]
+              },
+              "MapCalls": {
+                "Type": "Map",
+                "ItemsPath": "$.calls",
+                "MaxConcurrency": 5,
+                "Iterator": {
+                  "StartAt": "GetConversationContext",
+                  "States": {
+                    "GetConversationContext": {
+                      "Type": "Task",
+                      "Resource": "${GetContextArn}",
+                      "Next": "CreateVapiCall",
+                      "Retry": [{
+                        "ErrorEquals": ["States.TaskFailed"],
+                        "IntervalSeconds": 2,
+                        "MaxAttempts": 3,
+                        "BackoffRate": 2.0
+                      }],
+                      "Catch": [{
+                        "ErrorEquals": ["States.ALL"],
+                        "ResultPath": "$.contextError",
+                        "Next": "CreateVapiCall"
+                      }]
+                    },
+                    "CreateVapiCall": {
+                      "Type": "Task",
+                      "Resource": "${CreateVapiCallArn}",
+                      "Next": "LogSuccess",
+                      "Retry": [{
+                        "ErrorEquals": ["States.TaskFailed"],
+                        "IntervalSeconds": 1,
+                        "MaxAttempts": 2,
+                        "BackoffRate": 2.0
+                      }],
+                      "Catch": [{
+                        "ErrorEquals": ["States.ALL"],
+                        "ResultPath": "$.callError",
+                        "Next": "LogError"
+                      }]
+                    },
+                    "LogSuccess": {
+                      "Type": "Pass",
+                      "Result": {"status": "success"},
+                      "End": true
+                    },
+                    "LogError": {
+                      "Type": "Pass",
+                      "Result": {"status": "error"},
+                      "End": true
+                    }
+                  }
+                },
+                "Next": "SendSummary"
+              },
+              "SendSummary": {
+                "Type": "Pass",
+                "Result": {"message": "Scheduled calls execution complete"},
+                "End": true
+              },
+              "SendFailureNotification": {
+                "Type": "Pass",
+                "Result": {"message": "Workflow failed"},
+                "End": true
+              }
+            }
+          }
+        - GetScheduledCallsArn: !GetAtt GetScheduledCallsFunction.Arn
+          GetContextArn: !GetAtt GetContextFunction.Arn
+          CreateVapiCallArn: !GetAtt CreateVapiCallFunction.Arn
 
 # ============================================
   # Outputs
@@ -242,7 +223,7 @@ Resources:
 Outputs:
   WebhookApiUrl:
     Description: Webhook API endpoint URL
-    Value: !Sub "https://${WebhookApi}.execute-api.${AWS::Region}.amazonaws.com/prod/webhook"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/webhook"
 
   ScheduledCallsWorkflowArn:
     Description: Step Functions workflow ARN
@@ -251,3 +232,7 @@ Outputs:
   WebhookFunctionArn:
     Description: Webhook Lambda function ARN
     Value: !GetAtt WebhookFunction.Arn
+
+  GetScheduledCallsFunctionArn:
+    Description: Get scheduled calls Lambda ARN
+    Value: !GetAtt GetScheduledCallsFunction.Arn
