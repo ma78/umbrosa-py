@@ -8,7 +8,7 @@ import json
 from datetime import datetime
 from typing import Dict, Any
 from supabase import create_client
-from secrets import get_credentials, get_config
+from umbrosa_secrets import get_credentials, get_config
 
 def lambda_handler(event, context):
     """
