@@ -48,7 +48,7 @@ class UmbrosaBackendStack(Stack):
 
         shared_layer = _lambda.LayerVersion(
             self, "SharedLayer",
-            code=_lambda.Code.from_asset("../src"),
+            code=_lambda.Code.from_asset("../lambdas/shared"),
             description="Shared utilities for Lambda functions",
             compatible_runtimes=[_lambda.Runtime.PYTHON_3_12],
         )

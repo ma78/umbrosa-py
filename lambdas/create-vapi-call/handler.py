@@ -4,7 +4,7 @@ Step Function Task: Create outbound call using Vapi SDK
 """
 
 import os
-from src.secrets import get_credentials
+from secrets import get_credentials
 from vapi import Vapi
 
 def lambda_handler(event, context):

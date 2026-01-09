@@ -4,7 +4,7 @@ Step Function Task: Fetch list of calls to execute for a batch
 """
 
 import os
-from src.secrets import get_config
+from secrets import get_config
 import json
 from typing import List, Dict, Any, Optional
 

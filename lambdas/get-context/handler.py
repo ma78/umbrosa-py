@@ -4,7 +4,7 @@ Step Function Task: Fetch previous conversation context from Supabase
 """
 
 import os
-from src.secrets import get_credentials
+from secrets import get_credentials
 from supabase import create_client
 
 def lambda_handler(event, context):
